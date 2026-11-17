@@ -2,6 +2,8 @@
 
 Builds a credit card default model and then does what a bank does with one: sets an approval policy, measures expected loss, stress-tests it, monitors it for drift, tests outcomes across demographic groups, explains individual decisions, and writes up the validation.
 
+**Live app:** https://toyourcredit.streamlit.app
+
 ![Threshold trade-offs](docs/screenshot.png)
 
 ## What it does
