@@ -18,6 +18,7 @@ Builds a credit card default model and then does what a bank does with one: sets
 | Scorecard | PD converted to a credit score and risk grade | `creditrisk/scorecard.py` |
 | Expected loss | PD x LGD x EAD per account, with credit-line drawdown | `creditrisk/loss.py` |
 | Stress testing | Adverse and severe behaviour shocks and a credit-line cut, re-scored | `creditrisk/stress.py` |
+| Current US conditions | Live Federal Reserve data; portfolio re-based to today's US charge-off rate; Fed stress scenario | `creditrisk/macro.py` |
 | Monitoring | Population stability index for the score and each input | `creditrisk/monitoring.py` |
 | Outcome testing | Approval rates and adverse impact ratios by group | `creditrisk/fairness.py` |
 | Reason codes | Exact per-account explanation of a decline | `creditrisk/explain.py` |
@@ -38,6 +39,7 @@ Builds a credit card default model and then does what a bank does with one: sets
 - **Stress.** Expected loss rises 22% in the adverse scenario and 81% in the severe one; the severe scenario cuts the approval rate from 52% to 15%.
 - **Credit line cut.** Cutting every limit by 20% lowers expected loss 7.7%, but the model then scores the same customers as riskier (average PD 22.0% to 23.1%) because a lower limit means higher utilization.
 - **Feature tested and rejected.** A six-month balance-trend input left held-out AUC unchanged at 0.757, so it is not in the model (`scripts/evaluate_candidate_feature.py`).
+- **Fed-anchored stress.** A regression on 126 quarters of Federal Reserve data links a one-point rise in unemployment to a 1.06-point rise in the card charge-off rate (R² 0.48). Applied to the Fed's 2026 severely adverse scenario (unemployment 10%) it implies a 10.2% charge-off rate, against an actual 2009 peak of 10.5%, and a 187% rise in expected loss on this portfolio.
 - **Monitoring.** In the adverse scenario the score PSI stays "stable" (0.06) while losses rise 22%; input-level PSI catches it.
 - **Outcome testing.** One group (high-school education) falls just under the 0.80 screening ratio although education is not a model input.
 
@@ -53,13 +55,13 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 streamlit run app.py                       # the app, at http://localhost:8501
-pytest                                     # 39 tests
+pytest                                     # 49 tests
 python scripts/build_exports.py            # refresh exports/*.csv
 python scripts/build_validation_report.py  # refresh docs/model_validation_report.md
 python scripts/evaluate_candidate_feature.py  # AUC with and without a candidate input
 ```
 
-Developed and tested on Python 3.13. The data file ships with the repo; no download, account or API key is needed.
+Developed on Python 3.13 and also run on 3.11. The loan data ships with the repo. The "Current US conditions" tab pulls Federal Reserve data from FRED once a day with no key; if that fails it uses `data/fred_snapshot.csv` and says so.
 
 ## Using the extracts in Tableau or Power BI
 
@@ -77,6 +79,8 @@ Developed and tested on Python 3.13. The data file ships with the repo; no downl
 
 **Expected loss.** `EL = PD x LGD x EAD`, `EAD = balance + CCF x unused limit`. Hand example: balance 40,000 on a 100,000 line with CCF 50% gives EAD 70,000; at PD 10% and LGD 60%, EL = 4,200.
 
+**Macro link.** `Δ charge-off = 0.12 + 1.06 × Δ unemployment` (one-year changes, in points). From 4.1% to 10% unemployment: 3.82 + 0.12 + 1.06 × 5.9 = 10.2%. Implied PD = 10.2% ÷ 60% LGD = 17.0%.
+
 **PSI.** `sum of (actual% - expected%) x ln(actual% / expected%)` over bins. Hand example: a 50/50 split moving to 60/40 gives 0.0405.
 
 **Adverse impact ratio.** Group approval rate divided by the highest group's approval rate. 40% against 50% gives 0.80.
@@ -87,12 +91,15 @@ Every hand example above is a test in `tests/`.
 
 UCI Machine Learning Repository, *Default of Credit Card Clients* (dataset 350). I-Cheng Yeh and Che-hui Lien (2009), *Expert Systems with Applications* 36(2). 30,000 Taiwanese credit card accounts, April to September 2005; 6,636 (22.1%) defaulted the following month.
 
+**Federal Reserve data (FRED).** Charge-off rate on credit card loans (CORCCACBS), delinquency rate on credit card loans (DRCCLACBS) and the unemployment rate (UNRATE), 1991 to date. The Fed's 2026 severely adverse scenario peak (10% unemployment) is from the Board's 4 February 2026 press release.
+
 ## Assumptions and limits
 
 - Existing cardholders with six months of history: a behavioural score, not a new-applicant score.
 - One market during a card-debt crisis. The 22% default rate is far above a normal portfolio.
 - LGD (60%), CCF (50%), margin (10%), equal loan size on the threshold tab, and the risk-grade bands are assumptions.
-- Stress scenarios shock model inputs; they are not tied to economic forecasts.
+- The behaviour scenarios shock model inputs. The Fed-anchored scenario rests on a one-variable regression that leaves out 2020 to 2022; including those years cuts the slope from 1.06 to 0.39.
+- Re-basing to US conditions changes the level of risk, not the borrowers, and uses the approximation charge-off rate ≈ PD × LGD. Fed data is quarterly, so "live" means the latest release.
 - One 70/30 random split with a fixed seed. No out-of-time test, because the data has a single observation date.
 - The profit-maximising cutoff is chosen on the same held-out accounts it is reported on.
 - PSI bands and the 0.80 ratio are screening conventions, not statistical tests or legal standards.
@@ -102,5 +109,4 @@ UCI Machine Learning Repository, *Default of Credit Card Clients* (dataset 350).
 
 - A larger loan-level dataset with origination dates (for example LendingClub or Fannie Mae) to allow out-of-time validation and vintage analysis
 - Weight-of-evidence binning to resolve the repayment-code finding
-- Link stress scenarios to economic variables
 - A Tableau Public dashboard on the extracts

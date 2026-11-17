@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from creditrisk import (fairness, features, loss, metrics, model, monitoring, pipeline, quality,  # noqa: E402
+from creditrisk import (fairness, features, loss, macro, metrics, model, monitoring, pipeline, quality,  # noqa: E402
                         stress, threshold)
 
 CUTOFF, LGD, CCF, MARGIN, LOAN = 0.14, 0.60, 0.50, 0.10, 10_000
@@ -94,6 +94,27 @@ def main():
     for s in stress.SCENARIOS[1:]:
         w(f"- **{s.name}:** {s.description}")
     w("\nScenarios are hypothetical shocks to model inputs, not forecasts linked to economic variables.\n")
+
+    w("### Fed-anchored macro stress\n")
+    fed_long = macro.load(live=False)[0]  # the saved snapshot, so this report is reproducible
+    panel = macro.quarterly_panel(fed_long)
+    fit, fit_all = macro.fit_chargeoff_model(panel), macro.fit_chargeoff_model(panel, exclude=None)
+    mt = macro.macro_stress_table(p, ead, LGD, fed_long)
+    w(md_table(mt.rename(columns={"scenario": "Scenario", "unemployment_pct": "Unemployment (%)",
+                                  "chargeoff_rate_pct": "Card charge-off rate (%)", "portfolio_pd": "Portfolio PD",
+                                  "expected_loss": "Expected loss", "expected_loss_vs_current": "Change vs current"}),
+               {"Unemployment (%)": "{:.1f}", "Card charge-off rate (%)": "{:.2f}", "Portfolio PD": "{:.1%}",
+                "Expected loss": "{:,.0f}", "Change vs current": "{:+.0%}"}) + "\n")
+    w(f"Portfolio PDs are re-based so their average equals the US card charge-off rate divided by LGD, using Federal "
+      f"Reserve data (FRED series CORCCACBS, DRCCLACBS, UNRATE; snapshot to {panel.index[-1].year} Q{panel.index[-1].quarter}). "
+      f"A regression of the one-year change in the charge-off rate on the one-year change in unemployment gives a slope of "
+      f"{fit['slope']:.2f} (R² {fit['r2']:.2f}, {fit['n']} quarters, 2020 to 2022 excluded). Applied to the Fed's 2026 "
+      f"severely adverse scenario (unemployment {macro.FED_SEVERELY_ADVERSE_UNEMPLOYMENT:.0f}%), it implies a charge-off rate of "
+      f"{mt['chargeoff_rate_pct'].iloc[1]:.1f}%, against an actual peak of {mt['chargeoff_rate_pct'].iloc[2]:.1f}%.\n")
+    w(f"**Finding 4 (model risk).** The result depends on excluding the pandemic years. With them included the slope "
+      f"falls to {fit_all['slope']:.2f} (R² {fit_all['r2']:.2f}) and the implied stressed charge-off rate to "
+      f"{macro.scenario_chargeoff(mt['chargeoff_rate_pct'].iloc[0], mt['unemployment_pct'].iloc[0], macro.FED_SEVERELY_ADVERSE_UNEMPLOYMENT, fit_all):.1f}%. "
+      f"The exclusion is a judgement that policy support in 2020 to 2022 would not repeat.\n")
 
     w("## 6. Ongoing monitoring\n")
     dev = res.train_scores[champ]

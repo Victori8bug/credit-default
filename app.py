@@ -8,7 +8,7 @@ import streamlit as st
 
 import numpy as np
 
-from creditrisk import (explain, fairness, features, loss, metrics, model, monitoring, pipeline, quality,
+from creditrisk import (explain, fairness, features, loss, macro, metrics, model, monitoring, pipeline, quality,
                         scorecard, stress, threshold, warehouse)
 
 BLUE, ORANGE, GREY = "#2a78d6", "#eb6834", "#8a8984"
@@ -26,6 +26,12 @@ def train_all():
 def portfolio_queries():
     con = warehouse.connect()
     return {name: warehouse.query(con, name) for name in ["03_portfolio_by_delinquency.sql", "04_portfolio_by_utilization.sql"]}
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner="Fetching Federal Reserve data...")
+def fed_data():
+    """Pull the Fed series at most once a day; fall back to the saved snapshot if the pull fails."""
+    return macro.load(live=True)
 
 
 res = train_all()
@@ -74,9 +80,9 @@ k4.metric(
     delta=f"{now['profit_per_applicant'] - approve_all['profit_per_applicant']:,.0f} vs approving everyone",
 )
 
-(tab_policy, tab_loss, tab_model, tab_monitor, tab_account, tab_sql, tab_notes) = st.tabs(
-    ["Threshold trade-offs", "Expected loss and stress", "Model quality", "Monitoring and fairness",
-     "Account explainer", "Portfolio (SQL)", "Assumptions and limits"]
+(tab_policy, tab_macro, tab_loss, tab_model, tab_monitor, tab_account, tab_sql, tab_notes) = st.tabs(
+    ["Threshold trade-offs", "Current US conditions", "Expected loss and stress", "Model quality", "Monitoring and fairness",
+     "Account explainer", "SQL", "Limits"]
 )
 
 # ------------------------------------------------------------ policy tab
@@ -275,6 +281,94 @@ with tab_model:
             "Positive raises predicted risk."
         )
 
+# ------------------------------------------------------------- macro tab
+with tab_macro:
+    fed_long, fed_source = fed_data()
+    panel = macro.quarterly_panel(fed_long)
+    now_vals = macro.latest(fed_long)
+    fit = macro.fit_chargeoff_model(panel)
+
+    def quarter(ts):
+        return f"{ts.year} Q{ts.quarter}"
+
+    if fed_source == "live":
+        st.success("Federal Reserve data pulled live from FRED (refreshed at most once a day).")
+    else:
+        st.warning("Live pull from FRED failed, so this tab is using the snapshot saved with the project "
+                   f"(latest quarter {quarter(now_vals['CORCCACBS']['date'])}).")
+
+    year_ago = panel.iloc[-5] if len(panel) > 4 else panel.iloc[0]
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"US unemployment ({now_vals['UNRATE']['date']:%b %Y})", f"{now_vals['UNRATE']['value']:.1f}%")
+    m2.metric(f"Card charge-off rate ({quarter(now_vals['CORCCACBS']['date'])})", f"{now_vals['CORCCACBS']['value']:.2f}%",
+              delta=f"{now_vals['CORCCACBS']['value'] - year_ago['chargeoff']:+.2f} pts vs a year earlier", delta_color="inverse")
+    m3.metric(f"Card delinquency rate ({quarter(now_vals['DRCCLACBS']['date'])})", f"{now_vals['DRCCLACBS']['value']:.2f}%",
+              delta=f"{now_vals['DRCCLACBS']['value'] - year_ago['delinquency']:+.2f} pts vs a year earlier", delta_color="inverse")
+    st.caption("Source: Board of Governors of the Federal Reserve System and Bureau of Labor Statistics, via FRED "
+               "(series UNRATE, CORCCACBS, DRCCLACBS). Rates cover credit card loans at all US commercial banks.")
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader("US card credit quality since 1991")
+        hist = panel.reset_index().rename(columns={"index": "date"}).melt(
+            id_vars="date", value_vars=["chargeoff", "delinquency"], var_name="series", value_name="rate")
+        hist["series"] = hist["series"].map({"chargeoff": "Charge-off rate", "delinquency": "Delinquency rate"})
+        st.altair_chart(
+            alt.Chart(hist).mark_line(strokeWidth=2).encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("rate:Q", title="Percent of card balances"),
+                color=alt.Color("series:N", scale=alt.Scale(domain=["Charge-off rate", "Delinquency rate"], range=[BLUE, ORANGE]),
+                                legend=alt.Legend(title=None, orient="top")),
+                tooltip=[alt.Tooltip("date:T", format="%b %Y"), "series:N", alt.Tooltip("rate:Q", format=".2f")],
+            ),
+            width="stretch",
+        )
+    with right:
+        st.subheader("Unemployment against charge-offs")
+        changes = macro.yoy_changes(panel).reset_index().rename(columns={"index": "date"})
+        xs = np.array([changes["d_unemployment"].min(), changes["d_unemployment"].max()])
+        line = pd.DataFrame({"d_unemployment": xs, "d_chargeoff": fit["intercept"] + fit["slope"] * xs})
+        dots = alt.Chart(changes).mark_circle(color=BLUE, size=45, opacity=0.6).encode(
+            x=alt.X("d_unemployment:Q", title="One-year change in unemployment (points)"),
+            y=alt.Y("d_chargeoff:Q", title="One-year change in charge-off rate (points)"),
+            tooltip=[alt.Tooltip("date:T", format="%b %Y"), alt.Tooltip("d_unemployment:Q", format="+.2f"),
+                     alt.Tooltip("d_chargeoff:Q", format="+.2f")],
+        )
+        fit_line = alt.Chart(line).mark_line(color=ORANGE, strokeWidth=2).encode(x="d_unemployment:Q", y="d_chargeoff:Q")
+        st.altair_chart(dots + fit_line, width="stretch")
+        with_covid = macro.fit_chargeoff_model(panel, exclude=None)
+        st.caption(
+            f"Each dot is one quarter. Fitted line: a one-point rise in unemployment over a year goes with a "
+            f"{fit['slope']:.2f}-point rise in the charge-off rate (R² {fit['r2']:.2f}, {fit['n']} quarters). "
+            f"2020 to 2022 is excluded because stimulus and forbearance reversed the usual link; "
+            f"including those years the slope drops to {with_covid['slope']:.2f} (R² {with_covid['r2']:.2f})."
+        )
+
+    st.subheader("The sample portfolio under today's conditions and the Fed's stress scenario")
+    macro_ead = loss.exposure_at_default(X_test["BILL_AMT1"], X_test["LIMIT_BAL"], ccf)
+    macro_df = macro.macro_stress_table(pd_scores, macro_ead, lgd, fed_long)
+    st.dataframe(
+        macro_df.rename(columns={
+            "scenario": "Scenario", "unemployment_pct": "Unemployment (%)", "chargeoff_rate_pct": "Card charge-off rate (%)",
+            "portfolio_pd": "Portfolio PD", "expected_loss": "Expected loss", "expected_loss_vs_current": "Change vs current"}
+        ).style.format({"Unemployment (%)": "{:.1f}", "Card charge-off rate (%)": "{:.2f}", "Portfolio PD": "{:.1%}",
+                        "Expected loss": "{:,.0f}", "Change vs current": "{:+.0%}"}),
+        hide_index=True,
+    )
+    fed_row, peak_row = macro_df.iloc[1], macro_df.iloc[2]
+    st.markdown(
+        f"The Federal Reserve's 2026 severely adverse scenario takes unemployment to "
+        f"{macro.FED_SEVERELY_ADVERSE_UNEMPLOYMENT:.0f}%. The regression turns that into a card charge-off rate of "
+        f"**{fed_row['chargeoff_rate_pct']:.1f}%**, close to the {peak_row['chargeoff_rate_pct']:.1f}% the industry actually "
+        f"reached in {peak_row['scenario'].split('(')[1].split(',')[0]}. On this portfolio, expected loss rises "
+        f"**{fed_row['expected_loss_vs_current']:+.0%}**."
+    )
+    st.caption(
+        "How it works: each account keeps its rank from the model, and every PD is shifted by the same amount so the "
+        "portfolio average equals charge-off rate ÷ LGD. The accounts are still the 2005 Taiwan sample; only the level "
+        "of risk is tied to US data. Charge-off rate ≈ PD × LGD is an approximation."
+    )
+
 # -------------------------------------------------------------- loss tab
 with tab_loss:
     ead = loss.exposure_at_default(X_test["BILL_AMT1"], X_test["LIMIT_BAL"], ccf)
@@ -469,7 +563,11 @@ with tab_notes:
   defaulted, far above a normal card portfolio. Cutoffs here would not transfer to another book.
 - **Profit inputs are assumptions.** On the threshold tab every account is treated as the same size, with one margin
   and one loss rate. LGD, CCF and the risk-grade bands are also assumptions, not estimates from data.
-- **Stress scenarios are hypothetical.** They shock the model's inputs and are not linked to economic forecasts.
+- **Stress scenarios are hypothetical.** The scenarios on the stress tab shock the model's inputs. The Fed-anchored
+  scenario on the conditions tab rests on a one-variable regression that explains about half the variation in
+  charge-offs and leaves out 2020 to 2022.
+- **US re-basing changes the level, not the borrowers.** The accounts remain the Taiwan sample; "charge-off rate ≈
+  PD × LGD" is an approximation, and the Fed data is published quarterly, so "live" means the latest release.
 - **Reason codes need review.** The model scores "paid in full this month" as riskier than carrying a balance, a
   counter-intuitive sign that a validator would challenge before these reasons went to a customer.
 - **The "best" cutoff is picked on the same held-out accounts it is reported on,** so its profit is somewhat flattering.

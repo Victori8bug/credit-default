@@ -82,6 +82,18 @@ The model estimates the probability that a credit card account defaults next mon
 
 Scenarios are hypothetical shocks to model inputs, not forecasts linked to economic variables.
 
+### Fed-anchored macro stress
+
+| Scenario | Unemployment (%) | Card charge-off rate (%) | Portfolio PD | Expected loss | Change vs current |
+|---|---|---|---|---|---|
+| Current US conditions | 4.1 | 3.82 | 6.4% | 27,874,733 | +0% |
+| Fed 2026 severely adverse | 10.0 | 10.21 | 17.0% | 80,017,421 | +187% |
+| Historical peak (2009 Q4, actual) | 9.9 | 10.54 | 17.6% | 82,880,296 | +197% |
+
+Portfolio PDs are re-based so their average equals the US card charge-off rate divided by LGD, using Federal Reserve data (FRED series CORCCACBS, DRCCLACBS, UNRATE; snapshot to 2026 Q2). A regression of the one-year change in the charge-off rate on the one-year change in unemployment gives a slope of 1.06 (R² 0.48, 126 quarters, 2020 to 2022 excluded). Applied to the Fed's 2026 severely adverse scenario (unemployment 10%), it implies a charge-off rate of 10.2%, against an actual peak of 10.5%.
+
+**Finding 4 (model risk).** The result depends on excluding the pandemic years. With them included the slope falls to 0.39 (R² 0.19) and the implied stressed charge-off rate to 6.1%. The exclusion is a judgement that policy support in 2020 to 2022 would not repeat.
+
 ## 6. Ongoing monitoring
 
 | Comparison | Score PSI | Status |
