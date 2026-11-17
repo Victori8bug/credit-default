@@ -15,7 +15,7 @@ Builds a credit card default model and then does what a bank does with one: sets
 | Approval policy | Approval rate, default rate and profit at every cutoff; break-even PD | `creditrisk/threshold.py` |
 | Scorecard | PD converted to a credit score and risk grade | `creditrisk/scorecard.py` |
 | Expected loss | PD x LGD x EAD per account, with credit-line drawdown | `creditrisk/loss.py` |
-| Stress testing | Adverse and severe behaviour shocks, re-scored | `creditrisk/stress.py` |
+| Stress testing | Adverse and severe behaviour shocks and a credit-line cut, re-scored | `creditrisk/stress.py` |
 | Monitoring | Population stability index for the score and each input | `creditrisk/monitoring.py` |
 | Outcome testing | Approval rates and adverse impact ratios by group | `creditrisk/fairness.py` |
 | Reason codes | Exact per-account explanation of a decline | `creditrisk/explain.py` |
@@ -34,6 +34,8 @@ Builds a credit card default model and then does what a bank does with one: sets
 - **Price of interpretability.** The challenger earns 27% more profit per applicant than the explainable champion.
 - **Expected loss.** 106.2M expected against 110.4M on the accounts that defaulted (3.8% under), on 989M of exposure.
 - **Stress.** Expected loss rises 22% in the adverse scenario and 81% in the severe one; the severe scenario cuts the approval rate from 52% to 15%.
+- **Credit line cut.** Cutting every limit by 20% lowers expected loss 7.7%, but the model then scores the same customers as riskier (average PD 22.0% to 23.1%) because a lower limit means higher utilization.
+- **Feature tested and rejected.** A six-month balance-trend input left held-out AUC unchanged at 0.757, so it is not in the model (`scripts/evaluate_candidate_feature.py`).
 - **Monitoring.** In the adverse scenario the score PSI stays "stable" (0.06) while losses rise 22%; input-level PSI catches it.
 - **Outcome testing.** One group (high-school education) falls just under the 0.80 screening ratio although education is not a model input.
 
@@ -49,9 +51,10 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 streamlit run app.py                       # the app, at http://localhost:8501
-pytest                                     # 37 tests
+pytest                                     # 39 tests
 python scripts/build_exports.py            # refresh exports/*.csv
 python scripts/build_validation_report.py  # refresh docs/model_validation_report.md
+python scripts/evaluate_candidate_feature.py  # AUC with and without a candidate input
 ```
 
 Developed and tested on Python 3.13. The data file ships with the repo; no download, account or API key is needed.

@@ -74,9 +74,11 @@ The model estimates the probability that a credit card account defaults next mon
 | Baseline | 22.0% | 106,186,198 | +0.0% | 52.0% |
 | Adverse | 25.9% | 130,061,439 | +22.5% | 49.9% |
 | Severe | 34.3% | 191,750,935 | +80.6% | 15.1% |
+| Credit line cut | 23.1% | 98,059,925 | -7.7% | 44.8% |
 
 - **Adverse:** Payments fall 25%, balances rise 10%, accounts already late slip one more month.
 - **Severe:** Payments fall 50%, balances rise 25%, every account carrying a balance slips one month.
+- **Credit line cut:** The lender cuts every credit limit by 20%; customer payments and balances are unchanged.
 
 Scenarios are hypothetical shocks to model inputs, not forecasts linked to economic variables.
 
@@ -87,6 +89,7 @@ Scenarios are hypothetical shocks to model inputs, not forecasts linked to econo
 | Development vs held-out | 0.001 | Stable |
 | Development vs adverse scenario | 0.057 | Stable |
 | Development vs severe scenario | 1.324 | Material shift |
+| Development vs credit line cut scenario | 0.037 | Stable |
 
 **Finding 2.** Under the adverse scenario the score PSI stays in the stable band while expected loss rises +22%, and the input `months_late_now` shows a PSI of 0.98. Monitoring the score alone would have missed the deterioration; inputs must be monitored too.
 

@@ -21,6 +21,7 @@ class Scenario:
     balance_multiplier: float   # balances grow by this factor
     slip: str                   # who falls one more month behind: "none", "late" or "revolving"
     description: str
+    limit_multiplier: float = 1.0  # the lender changes every credit line by this factor
 
 
 SCENARIOS = [
@@ -29,15 +30,18 @@ SCENARIOS = [
              "Payments fall 25%, balances rise 10%, accounts already late slip one more month."),
     Scenario("Severe", 0.50, 1.25, "revolving",
              "Payments fall 50%, balances rise 25%, every account carrying a balance slips one month."),
-    # TODO (Victoria): design a scenario of your own, e.g. a "credit line cut" where
-    # LIMIT_BAL falls 20% (utilization jumps) while payments hold. Add it to this list
-    # and it will appear in the app and the report automatically.
+    # A lender action, not a customer shock: what if we cut every credit line by 20%
+    # to reduce exposure? Customers behave exactly as before.
+    Scenario("Credit line cut", 1.00, 1.00, "none",
+             "The lender cuts every credit limit by 20%; customer payments and balances are unchanged.",
+             limit_multiplier=0.80),
 ]
 
 
 def apply(X: pd.DataFrame, s: Scenario) -> pd.DataFrame:
     """Return a shocked copy of the raw account columns."""
     out = X.copy()
+    out["LIMIT_BAL"] = out["LIMIT_BAL"] * s.limit_multiplier
     out[PAY_AMT_COLS] = out[PAY_AMT_COLS] * s.payment_multiplier
     # only positive balances grow; credit balances are left alone
     out[BILL_COLS] = out[BILL_COLS].where(out[BILL_COLS] <= 0, out[BILL_COLS] * s.balance_multiplier)

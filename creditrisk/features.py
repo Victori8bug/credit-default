@@ -5,6 +5,11 @@ of only 0.71 and its probabilities were unreliable. The raw repayment codes are
 not a straight line of risk (-2 = no balance, -1 = paid in full, 0 = paying the
 minimum, 1..8 = months late), and dollar balances are heavily skewed. The
 features below fix both problems and lift AUC to about 0.76.
+
+To add a feature: compute the column in engineer(), append its name to
+ENGINEERED_FEATURES, add the same expression to sql/02_account_features.sql and a
+reason text in explain.py, then rerun pytest. Test it first with
+scripts/evaluate_candidate_feature.py.
 """
 import numpy as np
 import pandas as pd
@@ -47,8 +52,16 @@ def engineer(X: pd.DataFrame) -> pd.DataFrame:
     out["log_credit_limit"] = np.log(X["LIMIT_BAL"])
     out["log_last_payment"] = np.log1p(X["PAY_AMT1"])
 
-    # TODO (Victoria): add a feature of your own and see whether test AUC moves.
-    # Idea: balance trend = (BILL_AMT1 - BILL_AMT6) / LIMIT_BAL, i.e. is debt growing?
-    # Add the column here, append its name to ENGINEERED_FEATURES, rerun pytest and the app.
-
     return out[ENGINEERED_FEATURES]
+
+
+def balance_trend(X: pd.DataFrame) -> pd.Series:
+    """Candidate feature, tested and NOT used by the model.
+
+    Change in balance over the six months as a share of the credit line:
+    +0.30 means the balance rose by 30% of the limit since month 6.
+    Adding it left held-out AUC unchanged at 0.757 and its coefficient was close
+    to zero (run scripts/evaluate_candidate_feature.py), so it was left out:
+    an input that adds no predictive power only adds something to maintain.
+    """
+    return ((X["BILL_AMT1"] - X["BILL_AMT6"]) / X["LIMIT_BAL"]).clip(-1, 1).rename("balance_trend")

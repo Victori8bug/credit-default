@@ -108,7 +108,7 @@ def test_reason_codes_are_capped_and_readable(fitted):
 def test_stress_scenarios_raise_risk_in_order(fitted):
     m, X_te, _ = fitted
     avg = [model.predict_pd(m, stress.apply(X_te, s)).mean() for s in stress.SCENARIOS]
-    assert avg[0] < avg[1] < avg[2]
+    assert avg[0] < avg[1] < avg[2]  # baseline < adverse < severe
 
 
 def test_baseline_scenario_changes_nothing(fitted):
@@ -124,6 +124,17 @@ def test_adverse_scenario_shock_hand_example():
     assert out["BILL_AMT1"] == pytest.approx(11_000)  # balances x 1.10
     assert out["BILL_AMT2"] == -200                   # credit balances untouched
     assert out["PAY_1"] == 3                          # already late -> one more month
+
+
+def test_credit_line_cut_scenario_hand_example():
+    row = {c: 0 for c in data.FEATURES}
+    row.update({"LIMIT_BAL": 100_000, "BILL_AMT1": 40_000, "PAY_AMT1": 1_000})
+    cut = next(s for s in stress.SCENARIOS if s.name == "Credit line cut")
+    out = stress.apply(pd.DataFrame([row]), cut).iloc[0]
+    assert out["LIMIT_BAL"] == pytest.approx(80_000)   # limit x 0.80
+    assert out["BILL_AMT1"] == 40_000 and out["PAY_AMT1"] == 1_000  # customer unchanged
+    # exposure falls: 40,000 + 0.5 x 40,000 unused = 60,000, down from 70,000
+    assert loss.exposure_at_default([out["BILL_AMT1"]], [out["LIMIT_BAL"]], 0.5)[0] == pytest.approx(60_000)
 
 
 def test_sql_features_match_pandas_features():

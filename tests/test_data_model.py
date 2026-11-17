@@ -55,3 +55,11 @@ def test_payment_ratio_is_one_when_nothing_was_owed():
     row = {c: 0 for c in data.FEATURES}
     row["LIMIT_BAL"] = 50_000
     assert features.engineer(pd.DataFrame([row])).iloc[0]["payment_ratio"] == 1.0
+
+
+def test_candidate_balance_trend_hand_example():
+    # balance rose from 10,000 to 40,000 on a 100,000 line -> +0.30
+    row = {c: 0 for c in data.FEATURES}
+    row.update({"LIMIT_BAL": 100_000, "BILL_AMT1": 40_000, "BILL_AMT6": 10_000})
+    assert features.balance_trend(pd.DataFrame([row])).iloc[0] == pytest.approx(0.30)
+    assert "balance_trend" not in features.ENGINEERED_FEATURES  # tested and rejected
